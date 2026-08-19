@@ -392,6 +392,13 @@ pub(crate) fn follow_hyperlink(
     relations: LinkRelations,
     hyperlink_suffix: Option<String>,
 ) {
+    // Step 2 of <https://html.spec.whatwg.org/multipage/#following-hyperlinks-2>:
+    // an `a`/`area` with a `download` attribute downloads the resource
+    // instead of navigating to it.
+    let download_attribute = (subject.is::<HTMLAnchorElement>() ||
+        subject.is::<HTMLAreaElement>())
+    .then(|| subject.get_attribute_string_value(&local_name!("download")))
+    .flatten();
     // Step 1: If subject cannot navigate, then return.
     if subject.cannot_navigate() {
         return;
@@ -487,12 +494,24 @@ pub(crate) fn follow_hyperlink(
         // Step 13: Navigate targetNavigable to urlString using subject's node document,
         //          with referrerPolicy set to referrerPolicy, userInvolvement set to
         //          userInvolvement, and sourceElement set to subject.
+        // <https://html.spec.whatwg.org/multipage/#downloading-hyperlinks>: the
+        // page may only suggest a filename for same-origin resources. For a
+        // cross-origin URL the download still happens, but the name comes from
+        // the response (Content-Disposition) or the URL instead.
+        let download = download_attribute.map(|filename| {
+            if document.origin().immutable().clone() == url.origin() {
+                filename
+            } else {
+                String::new()
+            }
+        });
+
         let secure = target_window.as_global_scope().is_secure_context();
         let upgrade_insecure_navigations_set = window
             .as_global_scope()
             .upgrade_insecure_navigations_set()
             .clone();
-        let load_data = LoadData::new(
+        let mut load_data = LoadData::new(
             LoadOrigin::Script(document.origin().snapshot()),
             url,
             document.about_base_url(),
@@ -505,6 +524,7 @@ pub(crate) fn follow_hyperlink(
             document.has_trustworthy_ancestor_origin(),
             document.creation_sandboxing_flag_set_considering_parent_iframe(),
         );
+        load_data.download = download;
         debug!("following hyperlink to {}", load_data.url);
         navigate(cx, target_window, history_handling, false, load_data);
     };

@@ -1090,6 +1090,54 @@ pub trait WebViewDelegate {
         _tree_update: accesskit::TreeUpdate,
     ) {
     }
+
+    /// Offer a file download to the embedder. Dropping the offer declines it.
+    fn notify_unsupported_response(&self, _webview: WebView, _response: UnsupportedResponse) {}
+    /// Receive a body chunk for an accepted download.
+    fn notify_response_chunk(
+        &self,
+        _webview: WebView,
+        _request_id: net_traits::request::RequestId,
+        _chunk: Vec<u8>,
+    ) {
+    }
+    /// Receive the result of an accepted download after its last chunk.
+    fn notify_response_eof(
+        &self,
+        _webview: WebView,
+        _request_id: net_traits::request::RequestId,
+        _result: Result<(), ()>,
+    ) {
+    }
+}
+
+pub struct UnsupportedResponse {
+    pub webview_id: servo_base::id::WebViewId,
+    pub request_id: net_traits::request::RequestId,
+    pub url: servo_url::ServoUrl,
+    pub content_type: Option<mime::Mime>,
+    pub default_filename: String,
+    pub(crate) responder: Option<Sender<bool>>,
+}
+
+impl std::fmt::Debug for UnsupportedResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.write_str("UnsupportedResponse(..)")
+    }
+}
+
+impl UnsupportedResponse {
+    pub fn accept(&mut self) {
+        if let Some(responder) = self.responder.take() {
+            let _ = responder.send(true);
+        }
+    }
+
+    pub fn decline(&mut self) {
+        if let Some(responder) = self.responder.take() {
+            let _ = responder.send(false);
+        }
+    }
 }
 
 pub(crate) struct DefaultWebViewDelegate;

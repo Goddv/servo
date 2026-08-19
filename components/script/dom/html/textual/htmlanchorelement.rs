@@ -175,6 +175,12 @@ impl HTMLAnchorElementMethods<crate::DomTypeHolder> for HTMLAnchorElement {
     make_setter!(SetHreflang, "hreflang");
 
     // https://html.spec.whatwg.org/multipage/#dom-a-type
+    // https://html.spec.whatwg.org/multipage/#dom-a-download
+    make_getter!(Download, "download");
+
+    // https://html.spec.whatwg.org/multipage/#dom-a-download
+    make_setter!(SetDownload, "download");
+
     make_getter!(Type, "type");
 
     // https://html.spec.whatwg.org/multipage/#dom-a-type
@@ -326,4 +332,50 @@ impl HTMLAnchorElementMethods<crate::DomTypeHolder> for HTMLAnchorElement {
 
     // https://html.spec.whatwg.org/multipage/#dom-a-referrerpolicy
     make_setter!(SetReferrerPolicy, "referrerpolicy");
+}
+
+impl Activatable for HTMLAnchorElement {
+    fn as_element(&self) -> &Element {
+        self.upcast::<Element>()
+    }
+
+    fn is_instance_activatable(&self) -> bool {
+        // https://html.spec.whatwg.org/multipage/#hyperlink
+        // "a [...] element[s] with an href attribute [...] must [..] create a
+        // hyperlink"
+        // https://html.spec.whatwg.org/multipage/#the-a-element
+        // "The activation behaviour of a elements *that create hyperlinks*"
+        self.as_element().has_attribute(&local_name!("href"))
+    }
+
+    /// <https://html.spec.whatwg.org/multipage/#the-a-element:activation-behaviour>
+    fn activation_behavior(
+        &self,
+        cx: &mut js::context::JSContext,
+        event: &Event,
+        target: &EventTarget,
+    ) {
+        let element = self.as_element();
+        let mouse_event = event.downcast::<MouseEvent>().unwrap();
+        let mut ismap_suffix = None;
+
+        // Step 1: If the target of the click event is an img element with an ismap attribute
+        // specified, then server-side image map processing must be performed.
+        if let Some(element) = target.downcast::<Element>() &&
+            target.is::<HTMLImageElement>() &&
+            element.has_attribute(&local_name!("ismap"))
+        {
+            let target_node = element.upcast::<Node>();
+            let rect = target_node.border_box(cx).unwrap_or_default();
+            ismap_suffix = Some(format!(
+                "?{},{}",
+                mouse_event.ClientX().to_f32().unwrap() - rect.origin.x.to_f32_px(),
+                mouse_event.ClientY().to_f32().unwrap() - rect.origin.y.to_f32_px()
+            ))
+        }
+
+        // Step 2: a `download` attribute makes this a download rather than a
+        // navigation; `follow_hyperlink` handles that.
+        follow_hyperlink(cx, element, self.relations.get(), ismap_suffix);
+    }
 }

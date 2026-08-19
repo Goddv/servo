@@ -15,6 +15,7 @@ use cookie::Cookie;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use headers::{ContentType, HeaderMapExt, ReferrerPolicy as ReferrerPolicyHeader};
 use http::{HeaderMap, HeaderValue, StatusCode, header};
+use http::header::CONTENT_DISPOSITION;
 use hyper_serde::Serde;
 use hyper_util::client::legacy::Error as HyperError;
 use malloc_size_of::malloc_size_of_is_0;
@@ -1463,3 +1464,42 @@ pub fn set_default_accept_language(headers: &mut HeaderMap) {
 }
 
 pub static PRIVILEGED_SECRET: LazyLock<u32> = LazyLock::new(|| rng().next_u32());
+
+/// True when `Content-Disposition` marks the response as an attachment, i.e.
+/// the server asked for it to be saved rather than displayed.
+/// <https://httpwg.org/specs/rfc6266.html#disposition.type>
+pub fn is_content_disposition_attachment(headers: &HeaderMap) -> bool {
+    headers
+        .get(CONTENT_DISPOSITION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(';')
+                .next()
+                .map(str::trim)
+                .is_some_and(|disposition| disposition.eq_ignore_ascii_case("attachment"))
+        })
+}
+
+pub fn extract_filename_from_content_disposition(headers: &HeaderMap) -> Option<String> {
+    let cd = headers.get(CONTENT_DISPOSITION)?.to_str().ok()?;
+    if let Some(index) = cd.find("filename=") {
+        let start = index + "filename=".len();
+        return Some(
+            cd.get(start..)
+                .unwrap_or_default()
+                .trim_matches('"')
+                .to_owned(),
+        );
+    }
+    if let Some(index) = cd.find("filename*=UTF-8''") {
+        let start = index + "filename*=UTF-8''".len();
+        return Some(
+            cd.get(start..)
+                .unwrap_or_default()
+                .trim_matches('"')
+                .to_owned(),
+        );
+    }
+    None
+}

@@ -39,6 +39,7 @@ use ipc_channel::router::ROUTER;
 use log::{debug, error, info, log_enabled, warn};
 use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
 use net_traits::blob_url_store::UrlWithBlobClaim;
+use net_traits::extract_filename_from_content_disposition;
 use net_traits::fetch::headers::get_value_from_header_list;
 use net_traits::http_status::HttpStatus;
 use net_traits::policy_container::{EmbedderPolicyValue, RequestPolicyContainer};
@@ -184,6 +185,96 @@ impl HttpState {
             ));
         receiver.await.ok()?
     }
+
+    pub(crate) async fn offer_unsupported_response(
+        &self,
+        request: &Request,
+        response: &Response,
+    ) -> Option<Box<dyn net_traits::FetchTaskTarget + Send>> {
+        let Some(webview_id) = request.target_webview_id else {
+            return None;
+        };
+        let fallback_filename = response
+            .url()
+            .and_then(|url| url.path().rsplit_once('/'))
+            .map(|(_, name)| name)
+            .unwrap_or("")
+            .to_string();
+        // Filename precedence, as browsers implement it: a server-supplied
+        // Content-Disposition name wins, then the name the page suggested via
+        // `<a download="...">`, then the last path segment of the URL.
+        let default_filename = extract_filename_from_content_disposition(&response.headers)
+            .or_else(|| {
+                request
+                    .download_filename
+                    .clone()
+                    .filter(|filename| !filename.is_empty())
+            })
+            .unwrap_or(fallback_filename);
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let offer = NetToEmbedderMsg::OfferUnsupportedResponse {
+            webview_id,
+            request_id: request.id,
+            url: response.url()?.clone(),
+            content_type: response
+                .metadata()
+                .ok()?
+                .metadata()
+                .content_type
+                .as_ref()
+                .map(|mime| mime::Mime::from(mime.0.clone())),
+            default_filename,
+            responder: sender,
+        };
+        self.embedder_proxy.send(offer);
+        let embedder_accepts = receiver.await.ok()?;
+        if !embedder_accepts {
+            return None;
+        }
+        Some(Box::new(EmbedderFetchTarget {
+            embedder_proxy: self.embedder_proxy.clone(),
+        }))
+    }
+}
+
+struct EmbedderFetchTarget {
+    embedder_proxy: GenericEmbedderProxy<NetToEmbedderMsg>,
+}
+
+impl net_traits::FetchTaskTarget for EmbedderFetchTarget {
+    fn process_request_body(&mut self, _request: &Request) {}
+    fn process_response(&mut self, _request: &Request, _response: &Response) {}
+    fn process_response_chunk(&mut self, request: &Request, chunk: Bytes) {
+        let Some(webview_id) = request.target_webview_id else {
+            return;
+        };
+        self.embedder_proxy
+            .send(NetToEmbedderMsg::FetchResponseChunk(
+                webview_id,
+                request.id,
+                chunk.to_vec(),
+            ));
+    }
+    fn process_response_eof(&mut self, request: &Request, response: &Response) {
+        let Some(webview_id) = request.target_webview_id else {
+            return;
+        };
+        let result = if response.aborted.load(Ordering::Acquire) {
+            Err(NetworkError::LoadCancelled)
+        } else {
+            response.get_network_error().cloned().map_or(Ok(()), Err)
+        };
+        self.embedder_proxy.send(NetToEmbedderMsg::FetchResponseEof(
+            webview_id, request.id, result,
+        ));
+    }
+    fn process_csp_violations(
+        &mut self,
+        _request: &Request,
+        _: Vec<content_security_policy::Violation>,
+    ) {
+    }
+    fn process_response_length_hint(&mut self, _request: &Request, _length: usize) {}
 }
 
 /// Step 11 of <https://fetch.spec.whatwg.org/#concept-fetch>.

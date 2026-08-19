@@ -10,6 +10,8 @@ use embedder_traits::{
     WebResourceResponseMsg,
 };
 use net_traits::CookieOperationId;
+use net_traits::NetworkError;
+use net_traits::request::RequestId;
 use servo_base::id::WebViewId;
 use servo_url::ServoUrl;
 use tokio::sync::mpsc::UnboundedSender as TokioSender;
@@ -39,4 +41,18 @@ pub enum NetToEmbedderMsg {
     EmbedderCookieOperationResponseWithCookies(CookieOperationId, Vec<Cookie<'static>>),
     /// Response to an asynchronous request from SiteDataManager.
     EmbedderCookieOperationResponse(CookieOperationId),
+    /// A navigation response the renderer cannot display inline. The embedder
+    /// decides whether to take it over (typically to save it to disk).
+    OfferUnsupportedResponse {
+        webview_id: WebViewId,
+        request_id: RequestId,
+        url: ServoUrl,
+        content_type: Option<mime::Mime>,
+        default_filename: String,
+        responder: TokioOneshotSender<bool>,
+    },
+    /// A chunk of a response the embedder took over.
+    FetchResponseChunk(WebViewId, RequestId, Vec<u8>),
+    /// The end of a response the embedder took over.
+    FetchResponseEof(WebViewId, RequestId, Result<(), NetworkError>),
 }

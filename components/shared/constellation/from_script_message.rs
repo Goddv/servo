@@ -183,6 +183,13 @@ pub struct LoadData {
     pub container_document_encoding: Option<&'static Encoding>,
     /// If this request is for the initial about:blank document.
     pub is_initial_about_blank: bool,
+
+    /// Set when this navigation came from a hyperlink with a `download`
+    /// attribute (or an explicit "Save Link As"): the response is handed to
+    /// the embedder to save rather than rendered. The `String` is the
+    /// filename the page suggested, empty when it gave none.
+    /// <https://html.spec.whatwg.org/multipage/#downloading-hyperlinks>
+    pub download: Option<String>,
     /// <https://html.spec.whatwg.org/multipage/#source-snapshot-params-activation>
     pub has_transient_activation: bool,
 }
@@ -227,6 +234,7 @@ impl LoadData {
             creation_sandboxing_flag_set,
             container_document_encoding: None,
             is_initial_about_blank: false,
+            download: None,
             has_transient_activation: false,
         }
     }

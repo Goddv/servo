@@ -18,6 +18,7 @@ use js::context::JSContext;
 use net_traits::blob_url_store::UrlWithBlobClaim;
 use net_traits::fetch::fetch_controller::FetchController;
 use net_traits::request::{
+    DownloadHandling,
     CredentialsMode, InsecureRequestsPolicy, Origin, PreloadedResources, RedirectMode,
     RequestBuilder, RequestClient, RequestMode,
 };
@@ -266,7 +267,21 @@ impl InProgressLoad {
         .crash(self.load_data.crash.clone())
         .client(request_client)
         .user_activation(self.load_data.has_transient_activation)
-        .url_list(self.url_list.clone());
+        .url_list(self.url_list.clone())
+        // A navigation renders what it can and hands anything else — an
+        // attachment, or a type the parser has no support for — to the
+        // embedder, rather than showing an "Unknown content type" page.
+        // A hyperlink with `download` skips rendering entirely.
+        .download_handling(match self.load_data.download {
+            Some(_) => DownloadHandling::Always,
+            None => DownloadHandling::WhenUnrenderable,
+        })
+        .download_filename(
+            self.load_data
+                .download
+                .clone()
+                .filter(|filename| !filename.is_empty()),
+        );
 
         request_builder.reload_navigation = self.load_data.reload_navigation;
         request_builder.history_navigation = self.load_data.history_navigation;

@@ -21,9 +21,11 @@ use mime::{self, Mime};
 use net_traits::fetch::headers::{determine_nosniff, extract_mime_type_as_mime};
 use net_traits::filemanager_thread::{FileTokenCheck, RelativePos};
 use net_traits::http_status::HttpStatus;
+use net_traits::is_content_disposition_attachment;
+use net_traits::mime_classifier::MimeClassifier;
 use net_traits::policy_container::PolicyContainer;
 use net_traits::request::{
-    BodyChunkRequest, BodyChunkResponse, CredentialsMode, Destination, Initiator,
+    BodyChunkRequest, BodyChunkResponse, CredentialsMode, Destination, DownloadHandling, Initiator,
     InsecureRequestsPolicy, InternalRequest, Origin, ParserMetadata, RedirectMode, Referrer,
     Request, RequestBody, RequestId, RequestMode, ResponseTainting, UpgradeInsecureNavigations,
     is_cors_safelisted_method, is_cors_safelisted_request_header,
@@ -868,6 +870,40 @@ pub async fn main_fetch(
         // the body got sent in one chunk
         target.process_request_body(request);
     }
+
+    // Let the navigation handle redirects, errors and empty responses normally.
+    let mut download_target = None;
+    if let Some(handling) = request.download_handling
+        && !response_loaded
+        && !response.is_network_error()
+        && response.actual_response().location_url.is_none()
+        && !is_null_body_status(&response.actual_response().status)
+    {
+        let unrenderable = extract_mime_type_as_mime(&response.headers)
+            .is_some_and(|mime| MimeClassifier::get_media_type(&mime).is_none());
+        let should_offer = match handling {
+            DownloadHandling::Always => true,
+            DownloadHandling::WhenUnrenderable => {
+                is_content_disposition_attachment(&response.headers) || unrenderable
+            },
+        };
+        if should_offer {
+            download_target = context
+                .state
+                .offer_unsupported_response(request, &response)
+                .await;
+        }
+    }
+
+    let target = if let Some(download_target) = download_target.as_deref_mut() {
+        // Complete the parser's pending fetch without loading a document.
+        let cancelled = Response::network_error(NetworkError::LoadCancelled);
+        target.process_response(request, &cancelled);
+        target.process_response_eof(request, &cancelled);
+        download_target
+    } else {
+        target
+    };
 
     // Step 22.
     target.process_response(request, &response);
