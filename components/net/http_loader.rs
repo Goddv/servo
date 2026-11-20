@@ -98,7 +98,8 @@ use crate::fetch::cors_cache::CorsCache;
 use crate::fetch::fetch_params::FetchParams;
 use crate::fetch::headers::{SecFetchDest, SecFetchMode, SecFetchSite, SecFetchUser};
 use crate::fetch::methods::{
-    CancellationListener,Data, DoneChannel, FetchContext, Target, fetch, main_fetch};
+    CancellationListener, Data, DoneChannel, FetchContext, Target, fetch, main_fetch,
+};
 use crate::hsts::HstsList;
 use crate::http_cache::{
     CacheKey, CachedResourcesOrGuard, HttpCache, ValidationStatus, construct_response,

@@ -1091,7 +1091,7 @@ pub trait WebViewDelegate {
     ) {
     }
 
-    /// Offer a file download to the embedder. Dropping the offer declines it.
+    /// Offer a file download to the embedder. Dropping the offer resumes normal navigation.
     fn notify_unsupported_response(&self, _webview: WebView, _response: UnsupportedResponse) {}
     /// Receive a body chunk for an accepted download.
     fn notify_response_chunk(
