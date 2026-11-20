@@ -97,7 +97,8 @@ use crate::embedder::NetToEmbedderMsg;
 use crate::fetch::cors_cache::CorsCache;
 use crate::fetch::fetch_params::FetchParams;
 use crate::fetch::headers::{SecFetchDest, SecFetchMode, SecFetchSite, SecFetchUser};
-use crate::fetch::methods::{Data, DoneChannel, FetchContext, Target, fetch, main_fetch};
+use crate::fetch::methods::{
+    CancellationListener,Data, DoneChannel, FetchContext, Target, fetch, main_fetch};
 use crate::hsts::HstsList;
 use crate::http_cache::{
     CacheKey, CachedResourcesOrGuard, HttpCache, ValidationStatus, construct_response,
@@ -190,6 +191,7 @@ impl HttpState {
         &self,
         request: &Request,
         response: &Response,
+        cancellation: &CancellationListener,
     ) -> Option<Box<dyn net_traits::FetchTaskTarget + Send>> {
         let Some(webview_id) = request.target_webview_id else {
             return None;
@@ -227,13 +229,15 @@ impl HttpState {
             responder: sender,
         };
         self.embedder_proxy.send(offer);
-        let embedder_accepts = receiver.await.ok()?;
-        if !embedder_accepts {
-            return None;
+        match receiver.await.ok()? {
+            true => Some(Box::new(EmbedderFetchTarget {
+                embedder_proxy: self.embedder_proxy.clone(),
+            })),
+            false => {
+                cancellation.cancel();
+                Some(Box::new(DiscardFetch))
+            },
         }
-        Some(Box::new(EmbedderFetchTarget {
-            embedder_proxy: self.embedder_proxy.clone(),
-        }))
     }
 }
 

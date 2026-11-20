@@ -3218,6 +3218,9 @@ impl ScriptThread {
         };
 
         if is_204_205 {
+            // A download can still be reading the response after the
+            // navigation pipeline is closed.
+            self.incomplete_loads.borrow_mut()[idx].controller.ignore();
             // If we have an existing window that is being navigated:
             if let Some(window) = self.documents.borrow().find_window(pipeline_id) {
                 let window_proxy = window.window_proxy();

@@ -890,16 +890,21 @@ pub async fn main_fetch(
         if should_offer {
             download_target = context
                 .state
-                .offer_unsupported_response(request, &response)
+                .offer_unsupported_response(request, &response, &context.cancellation_listener)
                 .await;
         }
     }
 
     let target = if let Some(download_target) = download_target.as_deref_mut() {
-        // Complete the parser's pending fetch without loading a document.
-        let cancelled = Response::network_error(NetworkError::LoadCancelled);
-        target.process_response(request, &cancelled);
-        target.process_response_eof(request, &cancelled);
+        // Reuse the navigation's 204 path to release its pending pipeline
+        // while the download target continues reading the original response.
+        let mut no_document = Response::new(
+            request.url(),
+            ResourceFetchTiming::new(ResourceTimingType::Navigation),
+        );
+        no_document.status = StatusCode::NO_CONTENT.into();
+        target.process_response(request, &no_document);
+        target.process_response_eof(request, &no_document);
         download_target
     } else {
         target
